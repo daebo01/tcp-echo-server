@@ -10,7 +10,12 @@ import (
 	"io"
 	"net"
 	"os"
+	"sync/atomic"
+	"time"
 )
+
+var _connCount = int64(0)
+var _connRecvCount = int64(0)
 
 // main serves as the program entry point
 func main() {
@@ -25,6 +30,19 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Printf("listening on %s, prefix: %s\n", listener.Addr(), prefix)
+
+	// print stats
+	go func() {
+		ticker := time.NewTicker(1 * time.Second)
+		for range ticker.C {
+			connCount := atomic.LoadInt64(&_connCount)
+			connRecvCount := atomic.SwapInt64(&_connRecvCount, 0)
+
+			if connCount > 0 {
+				fmt.Printf("connCount: %d, connRecvCount: %d\n", connCount, connRecvCount)
+			}
+		}
+	}()
 
 	// listen for new connections
 	for {
@@ -41,6 +59,9 @@ func main() {
 
 // handleConnection handles the lifetime of a connection
 func handleConnection(conn net.Conn, prefix string) {
+	atomic.AddInt64(&_connCount, 1)
+	defer atomic.AddInt64(&_connCount, -1)
+
 	defer conn.Close()
 	reader := bufio.NewReader(conn)
 	for {
@@ -52,11 +73,10 @@ func handleConnection(conn net.Conn, prefix string) {
 			}
 			return
 		}
-		fmt.Printf("request: %s", bytes)
+		atomic.AddInt64(&_connRecvCount, 1)
 
 		// prepend prefix and send as response
 		line := fmt.Sprintf("%s %s", prefix, bytes)
-		fmt.Printf("response: %s", line)
 		conn.Write([]byte(line))
 	}
 }
